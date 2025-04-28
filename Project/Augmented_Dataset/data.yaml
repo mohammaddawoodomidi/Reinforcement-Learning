@@ -1,0 +1,13 @@
+train: /home/Desktop/RL_f_project/Computer-Vision-24/Project/Augmented_Dataset/train/images
+val: /home/Desktop/RL_f_project/Computer-Vision-24/Project/Augmented_Dataset/valid/images
+test: /home/Desktop/RL_f_project/Computer-Vision-24/Project/Augmented_Dataset/test/images
+
+nc: 1
+names: ['chair']
+
+roboflow:
+  workspace: main-u2co0
+  project: occlusion-aware-object-detection
+  version: 8
+  license: MIT
+  url: https://universe.roboflow.com/main-u2co0/occlusion-aware-object-detection/dataset/8
