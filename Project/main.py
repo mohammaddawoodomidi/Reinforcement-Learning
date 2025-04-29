@@ -74,7 +74,7 @@ class ValidationCallback(BaseCallback):
                 
         return True
 
-# Insert a new callback for learning rate scheduling around line 54 (after ValidationCallback)
+# Callback for learning rate scheduling
 class LRSchedulerCallback(BaseCallback):
     def __init__(self, initial_lr=3e-4, min_lr=1e-5, decay_factor=0.5, decay_steps=1000):
         super(LRSchedulerCallback, self).__init__()
@@ -123,19 +123,7 @@ class OcclusionEnvironment(gym.Env):
         
         # Set labels directory
         self.labels_dir = labels_dir
-        if labels_dir is None:
-            # Try to infer labels directory from images directory
-            inferred_labels_dir = images_dir.replace('images', 'labels')
-            if os.path.exists(inferred_labels_dir):
-                self.labels_dir = inferred_labels_dir
-                logging.info(f"Inferred labels directory: {self.labels_dir}")
-            else:
-                logging.warning("No labels directory provided or found. Ground truth-based rewards won't be available.")
-        elif os.path.exists(labels_dir):
-            logging.info(f"Using provided labels directory: {self.labels_dir}")
-        else:
-            logging.warning(f"Provided labels directory not found: {labels_dir}")
-            self.labels_dir = None
+        logging.info(f"Using provided labels directory: {self.labels_dir}")
         
         # Define action space: [translate_x, translate_y, rotation, zoom]
         # All values normalized between -1 and 1
@@ -194,14 +182,11 @@ class OcclusionEnvironment(gym.Env):
             self.original_image = cv2.resize(self.original_image, (IMAGE_SIZE, IMAGE_SIZE))
         
         # Load ground truth annotations if path is available
-        if image_path and self.labels_dir:
-            self.current_ground_truth = self._load_ground_truth_annotations(image_path)
-            if self.current_ground_truth:
-                logging.debug(f"Loaded {len(self.current_ground_truth)} ground truth annotations for {image_path}")
-            else:
-                logging.debug(f"No ground truth annotations found for {image_path}")
+        self.current_ground_truth = self._load_ground_truth_annotations(image_path)
+        if self.current_ground_truth:
+            logging.debug(f"Loaded {len(self.current_ground_truth)} ground truth annotations for {image_path}")
         else:
-            self.current_ground_truth = []
+            logging.debug(f"No ground truth annotations found for {image_path}")
         
         # Make a copy of the original image
         self.current_image = self.original_image.copy()
@@ -249,7 +234,7 @@ class OcclusionEnvironment(gym.Env):
         occlusion_score = self._calculate_occlusion_score(results)
         map_score = self._calculate_map(results, self.current_ground_truth)
         
-        # Calculate reward - now uses mAP when ground truth is available
+        # Calculate reward
         reward = self._calculate_reward(detection_score, occlusion_score, map_score)
         
         # Update best image if better score
@@ -464,47 +449,30 @@ class OcclusionEnvironment(gym.Env):
     
     def _calculate_reward(self, detection_score, occlusion_score, map_score=None):
         """Calculate reward with adaptive weighting"""
-        # If we have ground truth, prioritize mAP improvement
-        if self.current_ground_truth and map_score is not None:
-            # mAP improvement (primary metric with ground truth)
-            map_improvement = map_score - self.previous_map_score
+        
+        # mAP improvement (primary metric with ground truth)
+        map_improvement = map_score - self.previous_map_score
             
-            # Occlusion reduction (negative is good)
-            occlusion_reduction = self.previous_occlusion_score - occlusion_score
+        # Occlusion reduction (negative is good)
+        occlusion_reduction = self.previous_occlusion_score - occlusion_score
             
-            # Calculate adaptive weights - emphasize what needs improvement
-            map_weight = 2.0 + max(0, 1.0 - map_score)  # Higher weight when mAP is low
-            occlusion_weight = 0.5 + min(1.5, occlusion_score)  # Higher weight when occlusion is high
+        # Calculate adaptive weights - emphasize what needs improvement
+        map_weight = 2.0 + max(0, 1.0 - map_score)  # Higher weight when mAP is low
+        occlusion_weight = 0.5 + min(1.5, occlusion_score)  # Higher weight when occlusion is high
             
-            # Calculate reward with adaptive weights
-            reward = map_weight * map_improvement + occlusion_weight * occlusion_reduction
+        # Calculate reward with adaptive weights
+        reward = map_weight * map_improvement + occlusion_weight * occlusion_reduction
             
-            # Additional reward for significant improvements
-            if map_improvement > 0.05:
-                reward += 1.0
+        # Additional reward for significant improvements
+        if map_improvement > 0.05:
+            reward += 1.0
                 
-            # Penalty for no improvement to encourage exploration
-            if abs(map_improvement) < 0.01 and abs(occlusion_reduction) < 0.01:
-                reward -= 0.1
-        else:
-            # Similar adaptive approach for confidence-based rewards
-            detection_improvement = detection_score - self.previous_detection_score
-            occlusion_reduction = self.previous_occlusion_score - occlusion_score
-            
-            detection_weight = 1.0 + max(0, 1.0 - detection_score)
-            occlusion_weight = 0.5 + min(1.0, occlusion_score)
-            
-            reward = detection_weight * detection_improvement + occlusion_weight * occlusion_reduction
-            
-            if detection_improvement > 0.1:
-                reward += 0.5
-                
-            if abs(detection_improvement) < 0.01 and abs(occlusion_reduction) < 0.01:
-                reward -= 0.1
+        # Penalty for no improvement to encourage exploration
+        if abs(map_improvement) < 0.01 and abs(occlusion_reduction) < 0.01:
+            reward -= 0.1
                 
         return reward
     
-    # Insert after line 589 (right after the _calculate_reward method)
     def _normalize_rewards(self, reward):
         """Normalize rewards to a reasonable range for stable training"""
         # Clip rewards to avoid extreme values
@@ -791,15 +759,11 @@ def evaluate_occlusion_reduction(model_path, test_images_dir, test_labels_dir, o
     plt.title('Average Confidence')
     plt.ylabel('Confidence')
 
-    # mAP comparison - only show if ground truth is available
+    # mAP comparison
     plt.subplot(2, 3, 3)
-    if summary['avg_baseline_map'] > 0 or summary['avg_optimized_map'] > 0:
-        plt.bar(['Baseline', 'Optimized'], [summary['avg_baseline_map'], summary['avg_optimized_map']])
-        plt.title('Average mAP (with Ground Truth)')
-    else:
-        plt.text(0.5, 0.5, 'mAP not available\n(No ground truth)', 
-                horizontalalignment='center', verticalalignment='center')
-        plt.title('Average mAP')
+    
+    plt.bar(['Baseline', 'Optimized'], [summary['avg_baseline_map'], summary['avg_optimized_map']])
+    plt.title('Average mAP (with Ground Truth)')
     plt.ylabel('mAP')
     
     # Improvement distribution
@@ -903,7 +867,7 @@ def main():
     if os.path.exists(train_labels_dir):
         print("Using ground truth annotations for reward calculation")
     else:
-        print("Warning: No ground truth annotations found, falling back to confidence-based rewards")
+        print("Warning: No ground truth annotations found for reward calculation")
     
     # Add evaluation_mode attribute to environments
     train_env.evaluation_mode = False  # Training environment shouldn't be in evaluation mode
